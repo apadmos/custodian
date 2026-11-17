@@ -37,6 +37,7 @@ python cleaner.py unit [--user]      # print the unit file without installing it
 sudo python cleaner.py install       # system service, runs as you ($SUDO_USER), starts on boot
 python cleaner.py install --user     # user service, no root needed
 python cleaner.py status [--user]
+python cleaner.py logs [--user] [-f] [--errors]   # journalctl for this service
 python cleaner.py uninstall [--user]
 ```
 
@@ -44,6 +45,15 @@ The service is named after `name` (lowercased, unsafe characters replaced by `-`
 interpreter and script you ran `install` with, so install from inside your virtualenv and don't move the script afterwards.
 
 User services only run while you're logged in unless you enable lingering: `loginctl enable-linger $USER`.
+
+## Logs
+
+Everything the process prints (and any crash traceback) goes to the systemd journal, tagged with the service name.
+On disk that's the binary journal under `/var/log/journal/` (or `/run/log/journal/` if persistent storage is off),
+so read it with `journalctl`, or just `python cleaner.py logs -f`.
+
+fancycli detects when it's writing to the journal: it drops color codes (which otherwise make journalctl show
+`[N B blob data]`) and logs `print_error` at error priority, so `python cleaner.py logs --errors` shows only errors.
 
 ## Stopping
 

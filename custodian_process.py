@@ -125,6 +125,8 @@ class CustodianProcess:
             f"ExecStart={self.exec_start(str(script))}",
             f"WorkingDirectory={script.parent}",
             "Environment=PYTHONUNBUFFERED=1",
+            # tag journal lines with the service name instead of "python3"
+            f"SyslogIdentifier={self.service_name}",
             "Restart=always",
             f"RestartSec={restart_sec}",
             # run() needs a moment after SIGTERM to finish its unit of work and dispose()
@@ -171,6 +173,17 @@ class CustodianProcess:
     def status(self, user: bool = False) -> int:
         return self._systemctl(user, "status", "--no-pager", self.service_name, check=False).returncode
 
+    def journalctl_command(self, user: bool = False, follow: bool = False, errors_only: bool = False) -> list[str]:
+        return (["journalctl"]
+                + (["--user"] if user else [])
+                + ["-u", self.service_name]
+                + (["-f"] if follow else [])
+                + (["-p", "err"] if errors_only else []))
+
+    def logs(self, user: bool = False, follow: bool = False, errors_only: bool = False) -> int:
+        """Show this service's output from the systemd journal."""
+        return subprocess.run(self.journalctl_command(user, follow, errors_only)).returncode
+
     # ------------------------------------------------------------------ #
     # Command line
     # ------------------------------------------------------------------ #
@@ -182,6 +195,7 @@ class CustodianProcess:
             python my_script.py install [--user] [--no-start] [--run-as USER]
             python my_script.py uninstall [--user]
             python my_script.py status [--user]
+            python my_script.py logs [--user] [-f] [--errors]
             python my_script.py unit [--user]    print the unit file without installing
         """
         parser = argparse.ArgumentParser(prog=Path(sys.argv[0]).name, description=self.description)
@@ -190,9 +204,13 @@ class CustodianProcess:
         for cmd, help_text in (("install", "register and enable as a systemd service"),
                                ("uninstall", "stop, disable and remove the systemd service"),
                                ("status", "show systemctl status"),
+                               ("logs", "show the service's output from the systemd journal"),
                                ("unit", "print the unit file that install would write")):
             p = sub.add_parser(cmd, help=help_text)
             p.add_argument("--user", action="store_true", help="use a systemd user service instead of a system one")
+            if cmd == "logs":
+                p.add_argument("-f", "--follow", action="store_true", help="keep printing new lines")
+                p.add_argument("--errors", action="store_true", help="only lines logged at error priority or worse")
             if cmd in ("install", "unit"):
                 p.add_argument("--run-as", help="user the system service runs as (default: $SUDO_USER or current user)")
             if cmd == "install":
@@ -205,9 +223,12 @@ class CustodianProcess:
         elif command == "install":
             path = self.install(user=args.user, start=not args.no_start, run_as=args.run_as)
             print(f"Installed {path}")
+            print(f"Logs: {shlex.join(self.journalctl_command(args.user, follow=True))}")
         elif command == "uninstall":
             self.uninstall(user=args.user)
         elif command == "status":
             sys.exit(self.status(user=args.user))
+        elif command == "logs":
+            sys.exit(self.logs(user=args.user, follow=args.follow, errors_only=args.errors))
         elif command == "unit":
             print(self.unit_file_contents(user=args.user, run_as=args.run_as), end="")
